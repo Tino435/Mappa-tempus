@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Mappa Interattiva - Tempus 2026</title>
+    
+    <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/image-map-resizer/1.0.10/js/imageMapResizer.min.js"></script>
+
+    <style>
+    :root { 
+        --medieval-blue: #2c3e50; 
+        --gold: #f1c40f; 
+        --parchment: #e0d7c6; 
+    }
+
+    body { 
+        margin: 0;
+        padding: 0; 
+        height: 100vh; 
+        width: 100vw;
+        font-family: 'Georgia', serif; 
+        background: #ccd5de; 
+        overflow: hidden; 
+        position: fixed; 
+    }
+
+    .map-viewport {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        justify-content: center;
+    }
+
+    #panzoom-element { 
+        display: inline-block; 
+        cursor: grab;
+        height: 1080px;
+        width: 1920px; 
+    }
+
+    #map-image { 
+        display: block;  
+        height: 1080px;
+        width: 1920px; 
+        pointer-events: none;
+        max-width: none !important;
+    }
+
+    .map-controls {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        gap: 10px;
+    }
+
+    .map-controls button {
+        background: var(--gold);
+        color: var(--medieval-blue);
+        border: 2px solid var(--medieval-blue);
+        padding: 8px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-family: 'Georgia', serif;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        cursor: pointer;
+    }
+    
+    
+    .map-point {
+        position: absolute;
+        width: 50px; 
+        height: 50px;
+        transform: translate(-50%, -50%);
+        z-index: 9999;
+        cursor: pointer;
+        background: rgba(255, 0, 0, 0); 
+        pointer-events: auto;
+    }
+    
+
+    /* --- BOTTOM SHEET (Ex Sidebar) --- */
+    .sidebar { 
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 70vh; /* Copre il 70% dello schermo quando aperto */
+        background: var(--medieval-blue); 
+        color: white; 
+        padding: 20px; 
+        box-sizing: border-box;
+        overflow-y: auto; 
+        z-index: 2000; 
+        box-shadow: 0 -5px 20px rgba(0,0,0,0.5); 
+        border-radius: 20px 20px 0 0; /* Angoli arrotondati in alto */
+        transform: translateY(100%); /* Nascosto inizialmente */
+        transition: transform 0.4s cubic-bezier(0.33, 1, 0.68, 1); 
+    }
+
+    .sidebar.active { 
+        transform: translateY(0); /* Sale su */
+    }
+
+    /* "Maniglia" visiva per il Bottom Sheet */
+    .sidebar::before {
+        content: "";
+        width: 40px;
+        height: 5px;
+        background: rgba(255,255,255,0.3);
+        border-radius: 10px;
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .sidebar h2 { 
+        font-size: 1.2rem; 
+        border-bottom: 2px solid var(--gold); 
+        padding-bottom: 10px; color: var(--gold); 
+        text-transform: uppercase; margin-top: 10px; 
+    }
+
+    .legend-list { 
+        padding: 0; 
+        list-style: none; 
+        margin: 0 0 20px 0; 
+    }
+
+    .legend-item { 
+        cursor: pointer; 
+        padding: 15px 0; 
+        border-bottom: 1px solid rgba(255,255,255,0.1); 
+        font-size: 1rem; 
+    }
+
+    /* Hamburger (Pulsante per aprire la lista) */
+    .hamburger { 
+        display: flex; 
+        position: fixed; 
+        bottom: 30px; 
+        right: 20px; 
+        z-index: 1500; 
+        background: var(--gold); 
+        border: none;
+        border-radius: 50%; 
+        width: 60px;
+        height: 60px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .hamburger span { 
+        display: block; 
+        width: 25px; 
+        height: 3px; 
+        background: var(--medieval-blue); 
+    }
+
+    /* Popup (Modal) adattato per Mobile */
+    .modal-content { 
+        background: #fdfaf0; 
+        margin: 50% auto; /* Più centrale su mobile */
+        padding: 25px; 
+        width: 85%; 
+        border-radius: 15px;
+    }
+
+    /* Stile base del contenitore Modal (lo sfondo scuro) */
+    .modal {
+        display: none; /* Nascosto di default */
+        position: fixed;
+        z-index: 3000; /* Sopra la sidebar e la mappa */
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.7); /* Sfondo semi-trasparente */
+        backdrop-filter: blur(3px); /* Effetto sfocato opzionale */
+    }
+
+    /* Il contenuto effettivo del popup */
+    .modal-content {
+        background-color: #fdfaf0;
+        margin: 30% auto; /* Distanza dall'alto */
+        padding: 25px;
+        border-radius: 15px;
+        width: 80%;
+        max-width: 400px;
+        position: relative;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    /* Pulsante di chiusura (X) */
+    .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+        line-height: 20px;
+    }
+
+    .close:hover {
+        color: var(--medieval-blue);
+    }
+
+    .selector-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(44, 62, 80, 0.95); /* Blu medievale opaco */
+    z-index: 5000; /* Sopra a ogni cosa */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: opacity 0.5s ease;
+}
+
+    .selector-content {
+        background: var(--parchment);
+        padding: 30px;
+        border-radius: 20px;
+        width: 85%;
+        max-width: 400px;
+        border: 3px solid var(--gold);
+    }
+
+    .selector-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        margin-top: 20px;
+    }
+
+    .selector-buttons button {
+        background: var(--medieval-blue);
+        color: white;
+        border: 2px solid var(--gold);
+        padding: 15px;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-family: 'Georgia', serif;
+        cursor: pointer;
+        transition: transform 0.2s;
+    }
+
+    .selector-buttons button:active {
+        transform: scale(0.95);
+    }
+
+    </style>
+</head>
+
+<body>
+
+    <div id="map-selector" class="selector-overlay">
+    <div class="selector-content">
+        <h2>Benvenuto a Tempus 2026</h2>
+        <p>Quale zona della festa vuoi esplorare?</p>
+        <div class="selector-buttons">
+            <button onclick="selectZone('sinistra')">🏰 Zona Castello / Via Bini</button>
+            <button onclick="selectZone('destra')">⛪ Zona Duomo / Campanile</button>
+        </div>
+    </div>
+</div>
+
+<div class="map-controls">
+    <button type="button" onclick="goToZone('castello')">🏰 Castello</button>
+    <button onclick="goToZone('duomo')">⛪ Duomo</button>
+</div>
+
+<button class="hamburger" onclick="toggleMenu()">
+    <span></span>
+    <span></span>
+    <span></span>
+</button>
+
+<div class="sidebar" id="sidebarMenu">
+    <div class="sheet-handle"></div> 
+    
+    <h2>I Luoghi della Festa</h2>
+    
+    <h3>Locande e Ristori</h3>
+    <ul class="legend-list">
+        <li class="legend-item" onclick="showInfo('Antro et Locanda de lo Duomo', '1️⃣ Ristoro medievale situato sotto le volte del Duomo. Specialità della tradizione.')">1️⃣ Antro et Locanda de lo Duomo</li>
+        <li class="legend-item" onclick="showInfo('Cort dal Diaul', '2️⃣ Suggestivo punto di ristoro incastonato tra le mura storiche.')">2️⃣ Cort dal Diaul</li>
+        <li class="legend-item" onclick="showInfo('Cervogeria de lo Eretico', '3️⃣ Produzione artigianale di birre ed elisir medievali.')">3️⃣ Cervogeria de lo Eretico</li>
+        <li class="legend-item" onclick="showInfo('Taberna de lo Rospo', '4️⃣ Osteria tipica per viandanti e avventori.')">4️⃣ Taberna de lo Rospo</li>
+        <li class="legend-item" onclick="showInfo('Porta Paninorum', '5️⃣ Antico varco del borgo, oggi sede di sapori tradizionali.')">5️⃣ Porta Paninorum</li>
+        <li class="legend-item" onclick="showInfo('Taberna Pane et Salamen', '6️⃣ Specialità locali, affettati e sapori del territorio.')">6️⃣ Taberna Pane et Salamen</li>
+    </ul>
+
+    <h3>Eventi e Spettacoli</h3>
+    <ul class="legend-list">
+        <li class="legend-item" onclick="showInfo('Incendio del Campanile', '⭐ Grande spettacolo pirotecnico serale che illumina il cielo del borgo.')">⭐ Incendio del Campanile</li>
+        <li class="legend-item" onclick="showInfo('Palio del Niederlech', '🏁 Venerdì 1: La storica sfida delle contrade per il primato.')">🏁 Palio del Niederlech</li>
+        <li class="legend-item" onclick="showInfo('Dama Vivente', '♟️ Lunedì 4: La suggestiva sfida a Dama Vivente in Piazza del Ferro.')">♟️ Dama Vivente</li>
+        <li class="legend-item" onclick="showInfo('Antro delle Torture', '⛓️ Esposizione storica di strumenti di giustizia medievale.')">⛓️ Antro delle Torture</li>
+        <li class="legend-item" onclick="showInfo('Accampamento Medievale', '⛺ Vita quotidiana, tende, armigeri e mestieri d\'altri tempi.')">⛺ Accampamento</li>
+        <li class="legend-item" onclick="showInfo('Salita delle Cartomanti', '🌙 Scopri il tuo destino tra stelle, tarocchi e mistero.')">🌙 Salita delle Cartomanti</li>
+        <li class="legend-item" onclick="showInfo('Mercati Medievali', '🧺 Banchi di artigianato artistico e mercanzie d\'epoca lungo le vie.')">🧺 Mercati</li>
+    </ul>
+
+    <h3>Servizi e Utilità</h3>
+    <ul class="legend-list">
+        <li class="legend-item" onclick="showInfo('Cambio Monete', '💰 Cambia qui i tuoi Euro nella moneta ufficiale della festa.')">💰 Cambio Monete</li>
+        <li class="legend-item" onclick="showInfo('Infopoint / WC / Nursery', 'ℹ️ Informazioni generali, programmi e servizi igienici con fasciatoio.')">ℹ️ Infopoint / WC / Nursery</li>
+        <li class="legend-item" onclick="showInfo('Salvacondotto', '⚔️ Punto di controllo e accoglienza per i visitatori.')">⚔️ Salvacondotto</li>
+        <li class="legend-item" onclick="showInfo('Cortile dei Nobili', '👑 Area riservata e incontri dell\'aristocrazia del borgo.')">👑 Cortile dei Nobili</li>
+    </ul>
+</div>
+
+<div class="map-viewport"> 
+    <div id="panzoom-element"> 
+        <img src="Mappa.png" id="map-image">
+
+        <div class="map-point" style="top: 30%; left: 67%;" onclick="showInfo('Antro et Locanda de lo Duomo', '1️⃣ Situata sotto le volte del Duomo.')"></div>
+        <div class="map-point" style="top: 39%; left: 43%;" onclick="showInfo('Cort dal Diaul', '2️⃣ Ristoro suggestivo tra le mura storiche.')"></div>
+        <div class="map-point" style="top: 52%; left: 54%;" onclick="showInfo('Cervogeria de lo Eretico', '3️⃣ Birre artigianali in Vicolo del Bretone.')"></div>
+        <div class="map-point" style="top: 59%; left: 64.5%;" onclick="showInfo('Taberna de lo Rospo', '4️⃣ Osteria tipica per viandanti.')"></div>
+        <div class="map-point" style="top: 19.5%; left: 28.5%;" onclick="showInfo('Porta Paninorum', '5️⃣ Sapori tradizionali lungo Via dei Conti.')"></div>
+        <div class="map-point" style="top: 32%; left: 19.5%;" onclick="showInfo('Taberna Pane et Salamen', '6️⃣ Specialità locali in Via Bini.')"></div>
+        <div class="map-point" style="top: 23%; left: 71.75%;" onclick="showInfo('Incendio del Campanile', '⭐ Spettacolo pirotecnico al Duomo.')"></div>
+        <div class="map-point" style="top: 84%; left: 12%;" onclick="showInfo('Palio / Dama Vivente', '🏁 Piazza del Ferro: Palio e Dama Vivente.')"></div>
+        <div class="map-point" style="top: 30%; left: 32%;" onclick="showInfo('Infopoint', 'ℹ️ Informazioni e WC con fasciatoio.')"></div>
+        <div class="map-point" style="top: 51%; left: 28%;" onclick="showInfo('Accampamento', '⛺ Tende e addestramento armigeri.')"></div>
+        <div class="map-point" style="top: 45%; left: 35.5%;" onclick="showInfo('Salita delle Cartomanti', '🌙 Scopri il tuo destino tra stelle e tarocchi.')"></div>
+        <div class="map-point" style="top: 31%; left: 76%;" onclick="showInfo('Mercati Medievali', '🧺 Artigianato e mercanzie d\'epoca.')"></div>
+        <div class="map-point" style="top: 24%; left: 64%;" onclick="showInfo('Mercati Medievali', '🧺 Artigianato e mercanzie d\'epoca.')"></div>
+        <div class="map-point" style="top: 32%; left: 42.75%;" onclick="showInfo('Mercati Medievali', '🧺 Artigianato e mercanzie d\'epoca.')"></div>
+        <div class="map-point" style="top: 28%; left: 56.75%;" onclick="showInfo('Mercati Medievali', '🧺 Artigianato e mercanzie d\'epoca.')"></div>
+        <div class="map-point" style="top: 38.5%; left: 37.5%;" onclick="showInfo('Antro delle Torture', '⛓️ Esposizione di strumenti di giustizia medievale.')"></div>
+        <div class="map-point" style="top: 41%; left: 71%;" onclick="showInfo('Cortile dei Nobili', '👑 Area riservata e incontri dell\'aristocrazia del borgo.')"></div>
+        <div class="map-point" style="top: 29.5%; left: 23.75%;" onclick="showInfo('Salvacondotto', '⚔️ Punto di controllo e accoglienza per i visitatori.')"></div>
+        <div class="map-point" style="top: 22.5%; left: 86%;" onclick="showInfo('Salvacondotto', '⚔️ Punto di controllo e accoglienza per i visitatori.')"></div>
+        <div class="map-point" style="top: 30%; left: 36%;" onclick="showInfo('Cambio monete', '💰 Cambio valuta e servizi bancari.')"></div>
+    </div>
+</div>
+
+<div id="infoModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h2 id="modal-title" style="color:var(--medieval-blue); margin-top:0;"></h2>
+        <p id="modal-text" style="line-height:1.6; color:#333;"></p>
+    </div>
+</div>
+
+</body>
+
+
+<script>
+    const elem = document.getElementById('panzoom-element');
+    const img = document.getElementById('map-image');
+
+    const panzoom = Panzoom(elem, {
+        maxScale: 4,
+        minScale: 0.5,
+        contain: 'outside',
+        cursor: 'move',
+        duration: 800,
+        easing: 'cubic-bezier(0.45, 0, 0.55, 1)'
+    });
+    
+    
+    function initMap() {
+        const windowHeight = window.innerHeight;
+        const targetScale = windowHeight / 1080;
+        panzoom.zoom(targetScale, { animate: false });
+    }
+
+    if (img.complete) {
+        initMap();
+    } else {
+        img.onload = initMap;
+    }
+
+    //Toggle per il Bottom Sheet
+    function toggleMenu() {
+        const sidebar = document.getElementById('sidebarMenu');
+        sidebar.classList.toggle('active');
+    }
+
+    // Mostra Info e chiude il Bottom Sheet se aperto
+    function showInfo(title, text, area) {
+        document.getElementById('sidebarMenu').classList.remove('active'); // Chiudi il bottom sheet
+
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-text').innerText = text;
+        document.getElementById('infoModal').style.display = "block";
+
+        
+        if (area=='sinsitra') {
+            panzoom.zoom(1,{animate: true});
+            panzoom.pan(0, 0, { animate: true });
+        }else if (area=='destra') {
+            panzoom.zoom(1, {animate: true});
+            panzoom.pan(-4000, 0, { animate: true });
+        }
+    }
+
+    function closeModal() { 
+        document.getElementById('infoModal').style.display = "none"; 
+    }
+
+    // Gestione della chiusura sidebar al tocco sulla mappa
+    const viewport = document.querySelector('.map-viewport');
+    const sidebar = document.getElementById('sidebarMenu');
+
+    viewport.addEventListener('click', function(event) {
+        if (sidebar.classList.contains('active')) {
+            sidebar.classList.remove('active');
+        }
+    });
+
+    elem.addEventListener('panzoomstart', () => {
+        sidebar.classList.remove('active');
+    });
+
+    function selectZone(zone) {
+        const selector = document.getElementById('map-selector');
+        selector.style.opacity = '0';
+        setTimeout(() => {
+            selector.style.display = 'none';
+        }, 500);
+
+        if (zone === 'sinistra') {
+            panzoom.zoom(1, {animate: true});
+            panzoom.pan(0, 0, { animate: true });
+        } else if (zone === 'destra') {
+            panzoom.zoom(1, {animate: true});
+            panzoom.pan(-4000, 0, { animate: true });
+        }
+    }
+
+    function goToZone(zone){
+        document.getElementById('sidebarMenu').classList.remove('active'); 
+
+        const slowOptions = {
+            animate: true,
+            duration: 800,
+            force: true
+        };
+
+        if (zone === 'castello') {
+            panzoom.zoom(1,slowOptions);
+            panzoom.pan(0, 0, slowOptions);
+        } else if (zone === 'duomo') {
+            panzoom.zoom(1, slowOptions);
+            panzoom.pan(-4000, 0, slowOptions);
+        }
+    }
+    
+</script>
+
+</body>
+</html>
